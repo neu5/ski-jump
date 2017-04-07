@@ -3,6 +3,8 @@ var HEIGHT = 768;
 var MIN = 0;
 var MAX = 180;
 
+var world = planck.World();
+
 var renderer = PIXI.autoDetectRenderer(WIDTH, HEIGHT);
 var container = document.getElementById('game');
 container.appendChild(renderer.view);
@@ -66,6 +68,8 @@ function shouldRotate(rotation) {
 
 function animate() {  
   requestAnimationFrame(animate);
+  
+  world.step(1 / 60);
 
   rotation = rotateToPoint(
     renderer.plugins.interaction.mouse.global.x, 
