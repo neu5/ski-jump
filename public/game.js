@@ -1,91 +1,126 @@
-var WIDTH = 1024;
-var HEIGHT = 768;
-var MIN = 0;
-var MAX = 180;
+planck.testbed('Car', function(testbed) {
 
-var world = planck.World();
+  testbed.speed = 1.3;
+  testbed.hz = 1 / 50;
 
-var renderer = PIXI.autoDetectRenderer(WIDTH, HEIGHT);
-var container = document.getElementById('game');
-container.appendChild(renderer.view);
+  testbed.height = 60;
+  testbed.width = 80;
 
-var stage = new PIXI.Container();
+  var pl = planck, Vec2 = pl.Vec2;
+  var world = new pl.World({
+    gravity : Vec2(0, -10)
+  });
 
-var PI = Math.PI;
-var rotation = 0;
+  // wheel spring settings
+  var HZ = 4.0;
+  var ZETA = 0.7;
+  var SPEED = 50.0;
 
-var background = new PIXI.Graphics();  
-background.beginFill(0xffffff);  
-background.drawRect(0, 0, WIDTH, HEIGHT);  
-background.endFill();
+  var ground = world.createBody();
 
-var jumperTexture = PIXI.Texture.fromImage('/public/jumper.png');
-var windTexture = PIXI.Texture.fromImage('/public/windArrow.png');
+  var groundFD = {
+    density : 0.0,
+    friction : 0.6
+  };
 
-var jumper = new PIXI.Sprite(jumperTexture);
-jumper.anchor.x = 0.5;  
-jumper.anchor.y = 0;
-jumper.position.x = 200;  
-jumper.position.y = 300;
+  var ADDITIONAL_HEIGHT = 35;
 
-var windArrow = new PIXI.Sprite(windTexture);
-windArrow.anchor.x = 0.5;  
-windArrow.anchor.y = 0.5;
-windArrow.position.x = 950;  
-windArrow.position.y = 60;
+  // hill
+  {
+    var ground = world.createBody();
 
-var windPower = new PIXI.Text('', {fontFamily : 'Arial', fontSize: 24, fill : 0x000000});
-windPower.position.x = 930;
-windPower.position.y = 120;
+    var x1 = -20.0;
+    var y1 = Math.pow(4/5, x1);
+    for (var i = 1; i < 60; ++i) {
+      var x2 = x1 + 0.5;
+      var y2 = Math.pow(4/5, x1);
 
-stage.addChild(background);
-stage.addChild(jumper);
-stage.addChild(windArrow);
-stage.addChild(windPower);
+      var shape = pl.Edge(Vec2(x1, y1), Vec2(x2, y2));
+      ground.createFixture(shape, 0.0);
 
-stage.interactive = true;
-
-function getWindDirection() {
-  var angle = Math.floor(Math.random() * (MAX - MIN)) + MIN;
-  return angle * PI/180;
-}
-
-function getWindPower() {
-  return (Math.random() * 4).toFixed(1);
-}
-
-function rotateToPoint(mx, my, px, py){  
-  var dist_Y = my - py;
-  var dist_X = mx - py;
-  var angle = Math.atan2(dist_Y, dist_X) - PI/2;
-
-  return angle;
-}
-
-function shouldRotate(rotation) {
-  return rotation < 0 && rotation > -PI;
-}
-
-function animate() {  
-  requestAnimationFrame(animate);
-  
-  world.step(1 / 60);
-
-  rotation = rotateToPoint(
-    renderer.plugins.interaction.mouse.global.x, 
-    renderer.plugins.interaction.mouse.global.y, 
-    jumper.position.x, 
-    jumper.position.y
-  );
-
-  if (shouldRotate(rotation)) {
-    jumper.rotation = rotation;
+      x1 = x2;
+      y1 = y2;
+    }
   }
 
-  windArrow.rotation = getWindDirection();
-  windPower.text = getWindPower();
+  // Car
+  var car = world.createDynamicBody(Vec2(-14.0, 1.0 + ADDITIONAL_HEIGHT));
+  car.createFixture(pl.Polygon([
+    Vec2(-1.5, -0.5),
+    Vec2(1.5, -0.5),
+    Vec2(1.5, 0.0),
+    Vec2(0.0, 0.9),
+    Vec2(-1.15, 0.9),
+    Vec2(-1.5, 0.2)
+  ]), 1.0);
 
-  renderer.render(stage);
-}
+  var wheelFD = {};
+  wheelFD.density = 1.0;
+  wheelFD.friction = 0.9;
 
-animate();
+  var wheelBack = world.createDynamicBody(Vec2(-15, 0.35 + ADDITIONAL_HEIGHT));
+  wheelBack.createFixture(pl.Circle(0.4), wheelFD);
+
+  var wheelFront = world.createDynamicBody(Vec2(-13.0, 0.4 + ADDITIONAL_HEIGHT));
+  wheelFront.createFixture(pl.Circle(0.4), wheelFD);
+
+  var springBack = world.createJoint(pl.WheelJoint({
+    motorSpeed : 0.0,
+    maxMotorTorque : 20.0,
+    enableMotor : true,
+    frequencyHz : HZ,
+    dampingRatio : ZETA
+  }, car, wheelBack, wheelBack.getPosition(), Vec2(0.0, 1.0)));
+
+  var springFront = world.createJoint(pl.WheelJoint({
+    motorSpeed : 0.0,
+    maxMotorTorque : 10.0,
+    enableMotor : false,
+    frequencyHz : HZ,
+    dampingRatio : ZETA
+  }, car, wheelFront, wheelFront.getPosition(), Vec2(0.0, 1.0)));
+
+  testbed.keydown = function() {
+    if (testbed.activeKeys.down) {
+      HZ = Math.max(0.0, HZ - 1.0);
+      springBack.setSpringFrequencyHz(HZ);
+      springFront.setSpringFrequencyHz(HZ);
+
+    } else if (testbed.activeKeys.up) {
+      HZ += 1.0;
+      springBack.setSpringFrequencyHz(HZ);
+      springFront.setSpringFrequencyHz(HZ);
+    }
+  };
+
+  testbed.step = function() {
+    // testbed.drawPolygon(points, 'red');
+    if (testbed.activeKeys.right && testbed.activeKeys.left) {
+      springBack.setMotorSpeed(0);
+      springBack.enableMotor(true);
+
+    } else if (testbed.activeKeys.right) {
+      springBack.setMotorSpeed(-SPEED);
+      springBack.enableMotor(true);
+
+    } else if (testbed.activeKeys.left) {
+      springBack.setMotorSpeed(+SPEED);
+      springBack.enableMotor(true);
+
+    } else {
+      springBack.setMotorSpeed(0);
+      springBack.enableMotor(false);
+    }
+
+    var cp = car.getPosition();
+
+    if (cp.x > testbed.x + 10) {
+      testbed.x = cp.x - 10;
+
+    } else if (cp.x < testbed.x - 10) {
+      testbed.x = cp.x + 10;
+    }
+  };
+
+  return world;
+});
